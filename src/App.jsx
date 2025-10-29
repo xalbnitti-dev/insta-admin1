@@ -1,20 +1,18 @@
 import React, { useState } from "react";
 
 /**
- * Frontend i thjeshtë për:
- *  - Zgjedhje llogarie (placeholder)
+ * Admin UI i thjeshtë:
+ *  - Upload një foto (POST /upload) → merr URL publike
+ *  - Ose shto manualisht një Image URL
  *  - Caption
- *  - Upload file (POST /upload) dhe auto-mbushje të Image URL
- *  - Ose futje manuale të një Image URL
  *  - Zgjedhje kohe (datetime-local)
- *  - SCHEDULE (POST /posts/schedule)
+ *  - Schedule (POST /posts/schedule)
  *
- * Kërkon që të kesh VITE_API_URL të vendosur te Vercel (p.sh. https://insta-scheduler-server.vercel.app)
+ * Kërkon: VITE_API_URL = https://<render-app>.onrender.com
  */
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
-// nëse ke më shumë llogari, shtoji këtu
 const ACCOUNTS = [
   { id: "aurora", label: "Aurora" },
   { id: "novara", label: "Novara" },
@@ -22,14 +20,27 @@ const ACCOUNTS = [
   { id: "cynara", label: "Cynara" },
 ];
 
+async function safeJsonFetch(url, options) {
+  const res = await fetch(url, options);
+  const text = await res.text(); // lexojmë si text që të kapim edhe rastin e HTML
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} – ${text.slice(0, 300)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Serveri nuk ktheu JSON:\n${text.slice(0, 300)}`);
+  }
+}
+
 export default function App() {
   const [account, setAccount] = useState(ACCOUNTS[0].id);
   const [caption, setCaption] = useState("");
-  const [externalUrl, setExternalUrl] = useState(""); // URL manuale
-  const [imageUrl, setImageUrl] = useState("");       // URL nga upload
+  const [externalUrl, setExternalUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
   const [isUploading, setIsUploading] = useState(false);
-  const [when, setWhen] = useState(""); // datetime-local
-  const [msg, setMsg] = useState(null); // { type: 'ok'|'err', text: string }
+  const [when, setWhen] = useState("");
+  const [msg, setMsg] = useState(null); // {type:'ok'|'err', text:string}
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0];
@@ -41,16 +52,13 @@ export default function App() {
       const form = new FormData();
       form.append("image", file);
 
-      const res = await fetch(`${API_URL}/upload`, {
+      const data = await safeJsonFetch(`${API_URL}/upload`, {
         method: "POST",
         body: form,
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Upload failed");
-
-      // Auto-mbushe fushën me url-në e kthyer nga serveri
       setImageUrl(data.url || "");
+      setMsg({ type: "ok", text: "✅ Foto u ngarkua." });
     } catch (err) {
       setMsg({ type: "err", text: err.message });
     } finally {
@@ -62,8 +70,7 @@ export default function App() {
     e.preventDefault();
     setMsg(null);
 
-    // prioritet: imageUrl nga upload, përndryshe externalUrl manuale
-    const finalImageUrl = imageUrl?.trim() || externalUrl?.trim();
+    const finalImageUrl = (imageUrl || externalUrl || "").trim();
     if (!finalImageUrl) {
       setMsg({ type: "err", text: "Vendos një foto (upload ose URL)." });
       return;
@@ -74,24 +81,16 @@ export default function App() {
     }
 
     try {
-      const payload = {
-        account,            // p.sh. "aurora"
-        caption,
-        imageUrl: finalImageUrl,
-        when,               // vlera nga input type="datetime-local"
-      };
+      const payload = { account, caption, imageUrl: finalImageUrl, when };
 
-      const res = await fetch(`${API_URL}/posts/schedule`, {
+      const data = await safeJsonFetch(`${API_URL}/posts/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Scheduling failed");
-
       setMsg({ type: "ok", text: "✅ Post u planifikua me sukses." });
-      // reset të lehtë (lë account-in të pandryshuar)
+      // nqs do reset:
       // setCaption(""); setExternalUrl(""); setImageUrl(""); setWhen("");
     } catch (err) {
       setMsg({ type: "err", text: err.message });
@@ -103,10 +102,7 @@ export default function App() {
       <div className="max-w-2xl mx-auto">
         <h1 className="text-2xl font-bold mb-6">Instagram Scheduler Admin</h1>
 
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-xl shadow p-6 space-y-5"
-        >
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow p-6 space-y-5">
           {/* Account */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -150,15 +146,13 @@ export default function App() {
               onChange={handleFileChange}
               className="block w-full"
             />
-            {isUploading && (
-              <p className="text-sm text-gray-500 mt-1">Uploading…</p>
-            )}
+            {isUploading && <p className="text-sm text-gray-500 mt-1">Uploading…</p>}
           </div>
 
           {/* Ose URL manuale */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Image URL (optional, used if no uploaded file)
+              Image URL (opsionale, përdoret nëse s’ka upload)
             </label>
             <input
               type="text"
@@ -167,7 +161,6 @@ export default function App() {
               placeholder="https://…"
               className="w-full border px-3 py-2 rounded"
             />
-            {/* kur ka ardhur URL nga upload, e shfaqim dhe e përdorim */}
             {imageUrl && (
               <p className="text-xs text-gray-500 mt-1">
                 Uploaded URL: <span className="underline">{imageUrl}</span>
@@ -201,13 +194,7 @@ export default function App() {
 
           {/* Status */}
           {msg && (
-            <p
-              className={
-                msg.type === "ok"
-                  ? "text-sm text-green-600"
-                  : "text-sm text-red-600"
-              }
-            >
+            <p className={msg.type === "ok" ? "text-sm text-green-600" : "text-sm text-red-600"}>
               {msg.text}
             </p>
           )}
