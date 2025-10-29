@@ -1,17 +1,12 @@
 import React, { useState } from "react";
 
 /**
- * Admin UI i thjeshtë:
- *  - Upload një foto (POST /upload) → merr URL publike
- *  - Ose shto manualisht një Image URL
- *  - Caption
- *  - Zgjedhje kohe (datetime-local)
- *  - Schedule (POST /posts/schedule)
- *
- * Kërkon: VITE_API_URL = https://<render-app>.onrender.com
+ * Vendos VITE_API_URL te Vercel = https://insta-scheduler-server.onrender.com
+ * (pa slash në fund)
  */
-
-const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+const API_URL =
+  import.meta.env.VITE_API_URL?.replace(/\/+$/, "") ||
+  "http://localhost:5000";
 
 const ACCOUNTS = [
   { id: "aurora", label: "Aurora" },
@@ -20,19 +15,6 @@ const ACCOUNTS = [
   { id: "cynara", label: "Cynara" },
 ];
 
-async function safeJsonFetch(url, options) {
-  const res = await fetch(url, options);
-  const text = await res.text(); // lexojmë si text që të kapim edhe rastin e HTML
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} – ${text.slice(0, 300)}`);
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Serveri nuk ktheu JSON:\n${text.slice(0, 300)}`);
-  }
-}
-
 export default function App() {
   const [account, setAccount] = useState(ACCOUNTS[0].id);
   const [caption, setCaption] = useState("");
@@ -40,7 +22,7 @@ export default function App() {
   const [imageUrl, setImageUrl] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [when, setWhen] = useState("");
-  const [msg, setMsg] = useState(null); // {type:'ok'|'err', text:string}
+  const [msg, setMsg] = useState(null);
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0];
@@ -48,17 +30,28 @@ export default function App() {
 
     setIsUploading(true);
     setMsg(null);
+
     try {
       const form = new FormData();
+      // EMRI I FUSHËS DUHET TË JETË "image" — përputhet me serverin
       form.append("image", file);
 
-      const data = await safeJsonFetch(`${API_URL}/upload`, {
+      const res = await fetch(`${API_URL}/upload`, {
         method: "POST",
         body: form,
       });
 
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Serveri ktheu përgjigje jo-JSON (mos po godet domain-in e gabuar?).");
+      }
+
+      if (!res.ok) throw new Error(data?.error || "Upload failed");
       setImageUrl(data.url || "");
-      setMsg({ type: "ok", text: "✅ Foto u ngarkua." });
+      setMsg({ type: "ok", text: "Foto u ngarkua." });
     } catch (err) {
       setMsg({ type: "err", text: err.message });
     } finally {
@@ -70,28 +63,23 @@ export default function App() {
     e.preventDefault();
     setMsg(null);
 
-    const finalImageUrl = (imageUrl || externalUrl || "").trim();
-    if (!finalImageUrl) {
-      setMsg({ type: "err", text: "Vendos një foto (upload ose URL)." });
-      return;
-    }
-    if (!when) {
-      setMsg({ type: "err", text: "Zgjedh kohën e publikimit." });
-      return;
-    }
+    const finalImageUrl = imageUrl?.trim() || externalUrl?.trim();
+    if (!finalImageUrl) return setMsg({ type: "err", text: "Vendos një foto (upload ose URL)." });
+    if (!when) return setMsg({ type: "err", text: "Zgjedh kohën e publikimit." });
 
     try {
-      const payload = { account, caption, imageUrl: finalImageUrl, when };
-
-      const data = await safeJsonFetch(`${API_URL}/posts/schedule`, {
+      const res = await fetch(`${API_URL}/posts/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ account, caption, imageUrl: finalImageUrl, when }),
       });
 
-      setMsg({ type: "ok", text: "✅ Post u planifikua me sukses." });
-      // nqs do reset:
-      // setCaption(""); setExternalUrl(""); setImageUrl(""); setWhen("");
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error("Serveri ktheu përgjigje jo-JSON."); }
+      if (!res.ok) throw new Error(data?.error || "Scheduling failed");
+
+      setMsg({ type: "ok", text: "✅ Posti u planifikua me sukses." });
     } catch (err) {
       setMsg({ type: "err", text: err.message });
     }
@@ -105,94 +93,46 @@ export default function App() {
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow p-6 space-y-5">
           {/* Account */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Account
-            </label>
-            <select
-              value={account}
-              onChange={(e) => setAccount(e.target.value)}
-              className="w-full border px-3 py-2 rounded"
-            >
+            <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
+            <select value={account} onChange={(e) => setAccount(e.target.value)} className="w-full border px-3 py-2 rounded">
               {ACCOUNTS.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label}
-                </option>
+                <option key={a.id} value={a.id}>{a.label}</option>
               ))}
             </select>
           </div>
 
           {/* Caption */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Caption
-            </label>
-            <textarea
-              rows={5}
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              className="w-full border px-3 py-2 rounded"
-              placeholder="Write your caption…"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Caption</label>
+            <textarea rows={4} value={caption} onChange={(e) => setCaption(e.target.value)} className="w-full border px-3 py-2 rounded" placeholder="Write your caption…" />
           </div>
 
           {/* Upload file */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Choose file
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              className="block w-full"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Choose file</label>
+            <input type="file" accept="image/*" onChange={handleFileChange} className="block w-full" />
             {isUploading && <p className="text-sm text-gray-500 mt-1">Uploading…</p>}
+            {imageUrl && <p className="text-xs text-gray-500 mt-1">Uploaded URL: <span className="underline">{imageUrl}</span></p>}
           </div>
 
           {/* Ose URL manuale */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Image URL (opsionale, përdoret nëse s’ka upload)
-            </label>
-            <input
-              type="text"
-              value={externalUrl}
-              onChange={(e) => setExternalUrl(e.target.value)}
-              placeholder="https://…"
-              className="w-full border px-3 py-2 rounded"
-            />
-            {imageUrl && (
-              <p className="text-xs text-gray-500 mt-1">
-                Uploaded URL: <span className="underline">{imageUrl}</span>
-              </p>
-            )}
+            <label className="block text-sm font-medium text-gray-700 mb-1">Image URL (optional)</label>
+            <input type="text" value={externalUrl} onChange={(e) => setExternalUrl(e.target.value)} placeholder="https://…" className="w-full border px-3 py-2 rounded" />
           </div>
 
           {/* Koha */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Publish time
-            </label>
-            <input
-              type="datetime-local"
-              value={when}
-              onChange={(e) => setWhen(e.target.value)}
-              className="w-full border px-3 py-2 rounded"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Publish time</label>
+            <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} className="w-full border px-3 py-2 rounded" />
           </div>
 
-          {/* Submit */}
           <div className="pt-2">
-            <button
-              type="submit"
-              disabled={isUploading}
-              className="px-4 py-2 rounded bg-black text-white disabled:opacity-60"
-            >
+            <button type="submit" disabled={isUploading} className="px-4 py-2 rounded bg-black text-white disabled:opacity-60">
               {isUploading ? "Uploading…" : "Schedule"}
             </button>
           </div>
 
-          {/* Status */}
           {msg && (
             <p className={msg.type === "ok" ? "text-sm text-green-600" : "text-sm text-red-600"}>
               {msg.text}
