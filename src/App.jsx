@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import { useState } from 'react'
 import axios from 'axios'
 
@@ -26,6 +27,31 @@ export default function App() {
       setStatus(`❌ ${err.response?.data?.error || err.message}`)
     }
   }
+const [imageUrl, setImageUrl] = useState("");
+const [isUploading, setIsUploading] = useState(false);
+
+const API_URL = import.meta.env.VITE_API_URL; // p.sh. https://insta-scheduler-server.vercel.app
+
+async function handleFileChange(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  setIsUploading(true);
+  try {
+    const form = new FormData();
+    form.append("image", file);
+    const res = await fetch(`${API_URL}/upload`, {
+      method: "POST",
+      body: form,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+    setImageUrl(data.url); // mbushe automatikisht me URL-në që vjen prej serverit
+  } catch (err) {
+    alert("Upload failed: " + err.message);
+  } finally {
+    setIsUploading(false);
+  }
+}
 
   return (
     <div className="max-w-xl mx-auto p-6">
@@ -58,6 +84,30 @@ export default function App() {
         <label className="block">
           <span className="text-sm">Image URL</span>
           <input
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+  Choose file
+</label>
+<input
+  type="file"
+  accept="image/*"
+  onChange={handleFileChange}
+  className="block w-full mb-3"
+/>
+
+{isUploading && (
+  <p className="text-sm text-gray-500 mt-1">Uploading...</p>
+)}
+
+<label className="block text-sm font-medium text-gray-700 mb-1">
+  Image URL
+</label>
+<input
+  type="text"
+  value={imageUrl}
+  onChange={(e) => setImageUrl(e.target.value)}
+  className="w-full border px-3 py-2 rounded"
+/>
+
             className="mt-1 w-full border rounded p-2"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
